@@ -1,0 +1,187 @@
+IDPA NOTES 
+Verify health of Avamar maintenance activities: (on -av)
+admin@avamar:~/>: status.dpn
+
+Confirm Data Domain snapshots of Avamar mtree are expiring:    (on-dd)
+DDBoostUser@ddhostname# snapshot list mtree *
+The Avamar mtree should have 2 snapshots from the most recent Avamar cycle and the remaining snapshots should be expired. if more than two then engage the support
+
+check the checkpoints status 
+admin@imy-av:~/>: cplist --full
+cp.20230604050256 Sun Jun  4 05:02:56 2023   valid rol ---  nodes   1/1 stripes    505
+cp.20230604050955 Sun Jun  4 05:09:55 2023   valid --- ---  nodes   1/1 stripes    505
+cp.20230605040241 Mon Jun  5 04:02:41 2023 invalid --- del  nodes   1/1 stripes    506
+cp.20230605040943 Mon Jun  5 04:09:43 2023 invalid --- del  nodes   1/1 stripes    506
+admin@imy-av:~/>:
+
+
+Confirm Data Domain cleaning has run within the last 7 days:   (on data domain)
+DDBoostUser@ddhostname# filesys clean status
+
+
+Start Data Domain filesystem cleaning:
+DDBoostUser@ddhostname# filesys clean start
+
+To check cleaning schedule:
+DDBoostUser@ddhostname# filesys clean show schedule
+
+
+Determine if checkpoint backups are enabled:
+admin@avamar:~/>: mccli dd show-prop --name=<DD hostname> | grep Target
+
+
+Utilize capacity.sh script to Identify highest change rate clients:
+admin@avamar:~/>: capacity.sh --ddr --gb --days=30
+
+
+---------------------------------Manual Maintenance Steps -------------------------------------------------
+Monitor Avamar maintenance activity status:
+admin@avamar:~/>: status.dpn
+ 
+Option B) Run Avamar maintenance activities manually:
+1) Suspend maintenance scheduler:
+admin@avamar:~/>: dpnctl stop maint
+2) Run manual garbage collection:
+admin@avamar:~/>: avmaint garbagecollect --ava --kill=20 --maxpass=0 --refcheck=true --throttlelevel=0 --usehistory=false --maxtime=7200
+3) Monitor garbage collection status:
+admin@avamar:~/>: watch avmaint gcstatus
+4) Once garbage collection result="OK", Take a checkpoint:
+admin@avamar:~/>: avmaint checkpoint --ava  
+5) Monitor checkpoint status and make note of checkpoint name:
+admin@avamar:~/>: watch avmaint cpstatus
+6) Once status="completed" and result="OK", Run checkpoint validation (HFS check) on manual checkpoint:
+admin@avamar:~/>: avmaint hfscheck --rolling --checkpoint=cp.xxxxxxxxxxxxxx --ava
+7) One prompt returns, Monitor HFS check status:
+admin@avamar:~/>: watch avmaint hfscheckstatus
+8) Once status="completed" and result="OK", Take additional checkpoint:
+admin@avamar:~/>: avmaint checkpoint --ava  
+9) Monitor checkpoint status:
+admin@avamar:~/>: watch avmaint cpstatus
+10) Once status="completed" and result="OK", Resume maintenance scheduler:
+admin@avamar:~/>: dpnctl start maint
+11) List checkpoints on Avamar:
+admin@neo1-ave:~/>: cplist
+cp.20200224122949 Mon Feb 24 07:29:49 2020   valid --- ---  nodes   1/1 stripes     50
+cp.20200224230843 Mon Feb 24 18:08:43 2020   valid rol ---  nodes   1/1 stripes     50
+12) Confirm all but two snapshots corresponding with new Avamar checkpoints are expired on Data Domain:
+DDBoostUser@ddhostname# snapshot list mtree *
+DBoostUser@neo1-ddve1#  snapshot list mtree *
+Snapshot Information for MTree: /data/col1/avamar-xxxxxxxxxx
+----------------------------------------------
+Name                Pre-Comp (GiB)   Create Date         Retain Until        Status
+-----------------   --------------   -----------------   -----------------   -------
+cp.20200221140020          35030.3   Feb 21 2020 09:00   Feb 24 2020 07:27   expired
+cp.20200221140258          35030.3   Feb 21 2020 09:03   Feb 24 2020 07:27   expired
+cp.20200222001825          35030.3   Feb 21 2020 19:18   Feb 24 2020 18:25   expired
+cp.20200224122316          35030.3   Feb 24 2020 07:23   Feb 24 2020 18:25   expired
+cp.20200224122949          35030.3   Feb 24 2020 07:30
+cp.20200224230843          30918.9   Feb 24 2020 18:09
+-----------------   --------------   -----------------   -----------------   -------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+---------------------------------------- How to check Certificate on IDPA -----------------
+acces idpa via web
+
+main-- dashboard-- 
+system -- certificate -- private key 
+will show the date of certificate
+
+---
+
+on dd1
+under administration
+access
+manage ca certificate 
+
+------------------------------------- How to update license on avamar ---------------------------------
+--Step 1
+--Switch to root and execute below command
+ mcrootca all
+
+--Step 2
+--You will get the CN name of the server
+enable_secure_config.sh --certs
+
+--Step3
+--Here you can put the CN name taken in above command
+
+openssl x509 -subject -dates -fingerprint -in /usr/local/avamar/etc/chain.pem
+subject= /C=US/ST=California/L=Irvine/O=EMC Corp/OU=BRS Division/CN=idpa-av.thuraya.com
+
+--Step 4
+--Go to below location and take the files for upload in AV browser
+/usr/local/avamar/etc
+cert.pem
+chain.pem
+key.pem
+
+--Step 5
+Go to System --> Private Key --> upload all 3 files and restart the service.
+
+Note: Once updated certificate in AV it will be automatically updated in DD
+
+
+-------------------------------------------------------
+Get list of backups (on av)
+copy the script to av and run it will generate a csv file. Helpful to see the backup size trend and backup expiries etc.
+chmod 775 dump_root_hashes.rb
+ruby dump_root_hashes.rb --mode=backuplist
+
+Checking the status of your Avamar node from the CLI,  To check the current status of the node run "dpnctl status".
+on av : #: dpnctl status
+
+This command will show all active jobs that are currently running on the system. They will be listed with their current status and progress. 
+#: mccli activity show --active=true
+
+In some scenarios you will be checking on the backup status of a particular server to see if backups have been performed successfully
+AVAMARNODE:~/#: mccli activity show --name=/DOMAIN/client.somedomain.com
+
+-------------------------------- How to find serial number of IDPA --------------------------------------------
+How to find the serial number of your Avamar node from the CLI
+Note: All commands are run from the CLI using putty or some other telnet/ssh terminal.
+
+For Avamar Datastore Gen 2 and Gen 3 nodes
+
+/usr/bin/omeport chassis frontpanel | grep "LCD Line"
+
+For Avamar Gen 2 and Gen 3 nodes setup in a RAIN array connect to the Utility node and run
+
+mapall --all+ --quiet '/usr/bin/omreport chassis frontpanel | grep "LCD Line 1" | sed "s/^.*: *\(.*\)/\1/"'
+
+For Avamar Datastore Generation 4 nodes
+
+/usr/bin/ipmitool fru print 0 | grep "Product Asset Tag" | sed "s/^.*: *\(.*\)/\1/"
+
+For Avamar Gen 4 nodes in RAIN array connect to the Utility node and run
+
+mapall --noerror --user=root --nodes=all+ --quiet 'echo `hostname -i`": "`/usr/bin/ipmitool fru print 0 | grep "Product Asset Tag" | sed "s/^.*:\s\(.*$\)/\1/"`'
+
+The serial number will be the first part of the result. You will also receive the IP address of the node.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+---------------------------------------- How to view events/alerts and doing acknowledge -------------------------------------
+Viewing and acknowledging Avamar events
+Avamar events can be quite annoying to acknowledge when you have a large number of them appearing in the GUI. After you have fixed all the issues that caused these events the quickest way to acknowledge them is from the CLI. You can archive this by use the trusty "mccli" command.
+
+The first command using "event show --unack=true" option will shows all the unacknowledged events.
+
+AVAMARNODE:~/#: mccli event show --unack=true
+0,23000,CLI command completed successfully.
+ID Date Type Code Category Severity Domain Summary
+-- ---- ---- ---- -------- -------- ------ -------
+
+The second command using "event ack --all=true" option will acknowledge all events.
+
+AVAMARNODE:~/#: mccli event ack --all=true
+0,23000,CLI command completed successfully.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--------------------------------------Search Avamar backups for a file or folder------------------------------------------
+
+Do you get requests to restore a file or folder from Avamar only to have the user have no idea where it was actually located? Do you not have Data Protection Search?
+Well, here is a fairly easy way to get the location you need from Avamar CLI.
+
+Log in as admin through your favorite SSH client and runavtar --list --account=path_of_client --after="YYYY-MM-DD hh:mm:ss" --before="YYYY-MM-DD hh:mm:ss" --verbose | grep file_name
+
+where 
+path_of_client is the Avamar domain location of the system /clients/servername
+file_name is a file or folder name you want to find.
+
